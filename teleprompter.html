@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Teleprompter</title>
+<!-- iOS / iPadOS: launch full-screen as a home-screen app -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Teleprompter">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0e0e10">
+<style>
+  :root {
+    --bg: #0e0e10;
+    --panel: #1a1a1f;
+    --panel-2: #24242c;
+    --text: #f5f5f5;
+    --muted: #9a9aa5;
+    --accent: #4da3ff;
+    --accent-2: #2b6fd1;
+    --border: #33333d;
+    --danger: #e0556b;
+    --ok: #5fd47f;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    padding: 9px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #2f2f39; }
+  button.primary { background: var(--accent-2); border-color: var(--accent-2); }
+  button.primary:hover { background: var(--accent); }
+  button.danger { color: var(--danger); border-color: #4a2a31; }
+  button:disabled { opacity: .4; cursor: default; }
+  input, textarea, select {
+    font-family: inherit;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 14px;
+  }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  label { font-size: 13px; color: var(--muted); }
+
+  /* ---------- Editor layout ---------- */
+  #editor { display: flex; height: 100vh; }
+  #sidebar {
+    width: 280px; min-width: 280px;
+    background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+  }
+  #sidebar header { padding: 18px 18px 12px; border-bottom: 1px solid var(--border); }
+  #sidebar header h1 { font-size: 18px; margin: 0 0 2px; }
+  #sidebar header p { font-size: 12px; color: var(--muted); margin: 0; }
+  #scriptList { flex: 1; overflow-y: auto; padding: 8px; }
+  .script-item {
+    padding: 10px 12px; border-radius: 8px; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .script-item:hover { background: var(--panel-2); }
+  .script-item.active { background: var(--accent-2); }
+  .script-item .name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .script-item .meta { font-size: 11px; color: var(--muted); }
+  .script-item.active .meta { color: #d6e6ff; }
+  .script-item .del { border: none; background: transparent; color: var(--muted); padding: 2px 6px; font-size: 16px; line-height: 1; border-radius: 6px; }
+  .script-item .del:hover { background: rgba(255,255,255,.12); color: var(--danger); }
+  #sidebar footer { padding: 12px; border-top: 1px solid var(--border); display: grid; gap: 8px; }
+  #sidebar footer .row { display: flex; gap: 8px; }
+  #sidebar footer .row button { flex: 1; font-size: 13px; padding: 8px; }
+
+  #main { flex: 1; display: flex; flex-direction: column; padding: 22px; gap: 14px; min-width: 0; }
+  #titleRow { display: flex; gap: 12px; align-items: center; }
+  #titleRow input { flex: 1; font-size: 16px; font-weight: bold; }
+  #stats { font-size: 13px; color: var(--muted); }
+  #stats b { color: var(--text); font-weight: bold; }
+  #scriptText { flex: 1; resize: none; font-size: 16px; line-height: 1.6; padding: 16px; min-height: 120px; }
+  #controls {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+  }
+  .ctrl { display: flex; flex-direction: column; gap: 6px; }
+  .ctrl .val { color: var(--accent); font-weight: bold; }
+  .ctrl input[type=range] { width: 100%; accent-color: var(--accent); }
+  .ctrl .check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+  #editorActions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+  #editorActions .spacer { flex: 1; }
+  .saved-flash { color: var(--ok); font-size: 13px; align-self: center; opacity: 0; transition: opacity .3s; }
+  .saved-flash.show { opacity: 1; }
+
+  /* ---------- Prompter ---------- */
+  #prompter { position: fixed; inset: 0; background: #000; display: none; flex-direction: column; z-index: 50; }
+  #prompter.active { display: flex; }
+  #stage { flex: 1; overflow: hidden; position: relative; }
+  #scrollArea { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+  #prompterContent {
+    font-family: Arial, Helvetica, sans-serif; color: #fff;
+    white-space: pre-wrap; word-wrap: break-word; padding: 0 8vw; text-align: center;
+  }
+  #guide { position: absolute; left: 0; right: 0; border-top: 2px solid rgba(77,163,255,.55); pointer-events: none; display: none; }
+  #guide.show { display: block; }
+  #stage.mirror #scrollArea { transform-origin: center; }
+  #countdown {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    font-size: 22vw; font-weight: bold; color: var(--accent); background: rgba(0,0,0,.6); z-index: 5;
+  }
+  #countdown.show { display: flex; }
+  #prompterBar {
+    background: rgba(20,20,24,.96); border-top: 1px solid var(--border);
+    padding: 12px 16px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  }
+  #prompterBar .group { display: flex; align-items: center; gap: 8px; }
+  #prompterBar label { white-space: nowrap; }
+  #prompterBar .val { color: var(--accent); font-weight: bold; min-width: 42px; display: inline-block; }
+  #prompterBar input[type=range] { width: 120px; accent-color: var(--accent); }
+  #prompterBar .spacer { flex: 1; }
+  #pStats { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  #pStats b { color: var(--text); }
+  .hint { color: var(--muted); font-size: 12px; }
+  kbd { background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: monospace; }
+
+  /* ---------- Remote banner ---------- */
+  /* connection dot on the Connect remote button */
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
+  .dot.on { background: var(--ok); }
+
+  /* ---------- Modal ---------- */
+  #modalBack {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 60;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  #modalBack.show { display: flex; }
+  #modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 22px; max-width: 460px; width: 100%; font-size: 14px; line-height: 1.55;
+  }
+  #modal h2 { margin: 0 0 4px; font-size: 18px; }
+  #modal .close { float: right; border: none; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; padding: 0 4px; }
+  #modal .close:hover { color: var(--text); }
+  #modal section { margin-top: 16px; }
+  #modal h3 { font-size: 14px; margin: 0 0 4px; color: var(--accent); }
+  #modal p { margin: 4px 0; color: var(--muted); }
+  #modal b, #modal code { color: var(--text); }
+  #modal code { background: var(--panel-2); padding: 2px 6px; border-radius: 5px; font-size: 13px; word-break: break-all; }
+  #modal .status { font-size: 13px; margin-top: 8px; }
+
+  /* ---------- Remote control page ---------- */
+  #remoteUI { display: none; min-height: 100vh; flex-direction: column; padding: 18px; gap: 14px; max-width: 560px; margin: 0 auto; }
+  #remoteUI.active { display: flex; }
+  #remoteUI h1 { font-size: 20px; margin: 6px 0 0; }
+  #remoteUI .status { font-size: 13px; color: var(--muted); }
+  #remoteUI .big { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  #remoteUI .big button { font-size: 18px; padding: 22px; }
+  #remoteUI .full { grid-column: 1 / -1; }
+  #remoteUI .rrow { display: flex; align-items: center; gap: 10px; }
+  #remoteUI .rrow label { width: 60px; }
+  #remoteUI .rrow input[type=range] { flex: 1; accent-color: var(--accent); }
+  #remoteUI .rrow .rval { width: 46px; text-align: right; color: var(--accent); font-weight: bold; }
+  #remoteUI .step { display: flex; gap: 10px; }
+  #remoteUI .step button { flex: 1; font-size: 22px; padding: 16px; }
+</style>
+</head>
+<body>
+
+<!-- ============ EDITOR ============ -->
+<div id="editor">
+  <div id="sidebar">
+    <header>
+      <h1>Teleprompter</h1>
+      <p>Scripts saved on this device</p>
+    </header>
+    <div id="scriptList"></div>
+    <footer>
+      <button id="newBtn" class="primary">+ New script</button>
+      <div class="row">
+        <button id="importBtn" title="Load .txt files from your computer">Import .txt</button>
+        <button id="folderBtn" title="Choose a local folder to save into (Chrome/Edge)">Set folder…</button>
+      </div>
+    </footer>
+  </div>
+
+  <div id="main">
+    <div id="titleRow">
+      <input id="titleInput" placeholder="Untitled script" />
+      <span id="savedFlash" class="saved-flash">Saved ✓</span>
+    </div>
+    <div id="stats"></div>
+    <textarea id="scriptText" placeholder="Type or paste your script here…"></textarea>
+
+    <div id="controls">
+      <div class="ctrl">
+        <label>Scroll speed — <span id="speedVal" class="val">5</span></label>
+        <input id="speed" type="range" min="1" max="20" step="0.5" value="5">
+      </div>
+      <div class="ctrl">
+        <label>Text size — <span id="sizeVal" class="val">48</span>px</label>
+        <input id="size" type="range" min="20" max="140" step="2" value="48">
+      </div>
+      <div class="ctrl">
+        <label>Countdown — <span id="cdVal" class="val">3</span>s</label>
+        <input id="countdownSec" type="range" min="0" max="10" step="1" value="3">
+      </div>
+      <div class="ctrl">
+        <label>Line height — <span id="lhVal" class="val">1.5</span></label>
+        <input id="lineHeight" type="range" min="1" max="2.5" step="0.1" value="1.5">
+      </div>
+      <div class="ctrl">
+        <span class="check"><input id="mirror" type="checkbox"> Mirror (beam-splitter glass)</span>
+        <span class="check"><input id="guideToggle" type="checkbox" checked> Show reading guide line</span>
+      </div>
+    </div>
+
+    <div id="editorActions">
+      <span class="hint">Settings above are saved <b>per script</b>.</span>
+      <span class="spacer"></span>
+      <button id="connectBtn"><span class="dot" id="remoteDot"></span>Connect remote</button>
+      <button id="saveBtn">Save</button>
+      <button id="downloadBtn" title="Download this script as a .txt file">Download .txt</button>
+      <button id="startBtn" class="primary">▶ Start prompter</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PROMPTER ============ -->
+<div id="prompter">
+  <div id="stage">
+    <div id="guide"></div>
+    <div id="scrollArea"><div id="prompterContent"></div></div>
+    <div id="countdown"></div>
+  </div>
+  <div id="prompterBar">
+    <div class="group">
+      <button id="playPause" class="primary">▶ Play</button>
+      <button id="restart">⟲ Restart</button>
+      <button id="fsBtn">⤢ Fullscreen</button>
+    </div>
+    <div class="group">
+      <label>Speed</label>
+      <input id="pSpeed" type="range" min="1" max="20" step="0.5" value="5">
+      <span id="pSpeedVal" class="val">5</span>
+    </div>
+    <div class="group">
+      <label>Size</label>
+      <input id="pSize" type="range" min="20" max="140" step="2" value="48">
+      <span id="pSizeVal" class="val">48</span>
+    </div>
+    <div class="spacer"></div>
+    <span id="pStats"></span>
+    <span class="hint"><kbd>Space</kbd> play · <kbd>↑↓</kbd> speed · <kbd>←→</kbd> size · <kbd>F</kbd> fullscreen · <kbd>R</kbd> restart · <kbd>Esc</kbd> exit</span>
+    <button id="exitBtn" class="danger">Exit</button>
+  </div>
+</div>
+
+<!-- ============ CONNECT REMOTE MODAL ============ -->
+<div id="modalBack">
+  <div id="modal">
+    <button class="close" id="modalClose">✕</button>
+    <h2>Connect a remote</h2>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<!-- ============ REMOTE CONTROL PAGE (?remote) ============ -->
+<div id="remoteUI">
+  <h1>Teleprompter Remote</h1>
+  <div class="status" id="rStatus">Connecting…</div>
+  <div class="big">
+    <button id="rToggle" class="primary full">▶ Play / Pause</button>
+    <button id="rStart">▶ Start</button>
+    <button id="rRestart">⟲ Restart</button>
+    <button id="rExit" class="danger full">■ Exit prompter</button>
+  </div>
+  <div class="rrow"><label>Speed</label><input id="rSpeed" type="range" min="1" max="20" step="0.5" value="5"><span class="rval" id="rSpeedVal">5</span></div>
+  <div class="step"><button data-d="speed:-1">– slower</button><button data-d="speed:1">faster +</button></div>
+  <div class="rrow"><label>Size</label><input id="rSize" type="range" min="20" max="140" step="2" value="48"><span class="rval" id="rSizeVal">48</span></div>
+  <div class="step"><button data-d="size:-4">– smaller</button><button data-d="size:4">bigger +</button></div>
+</div>
+
+<input id="fileInput" type="file" accept=".txt,text/plain" multiple style="display:none">
+
+<script>
+"use strict";
+(function () {
+  const REMOTE = new URLSearchParams(location.search).has("remote");
+  const SERVED = location.protocol === "http:" || location.protocol === "https:";
+  const $ = (id) => document.getElementById(id);
+
+  /* ============================================================
+     TRANSPORT — relays commands between prompter and phone.
+     - Served over the companion server: HTTP polling via /cmd
+     - Opened as a file:// : BroadcastChannel (same browser only)
+  ============================================================ */
+  let bc = null, pollTimer = null, lastId = 0, connected = false;
+  if (!SERVED && "BroadcastChannel" in window) bc = new BroadcastChannel("teleprompter");
+
+  function sendCmd(cmd) {
+    if (SERVED) {
+      fetch("cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) })
+        .then(() => setConn(true)).catch(() => setConn(false));
+    } else if (bc) { bc.postMessage(cmd); }
+  }
+  function onCmd(handler) {
+    if (SERVED) {
+      const poll = () => {
+        fetch("cmd?since=" + lastId).then(r => r.json()).then(d => {
+          setConn(true); lastId = d.now;
+          (d.cmds || []).forEach(handler);
+        }).catch(() => setConn(false));
+      };
+      pollTimer = setInterval(poll, 350); poll();
+    } else if (bc) { bc.onmessage = (e) => handler(e.data); }
+  }
+  function setConn(on) { connected = on; if (typeof onConnChange === "function") onConnChange(on); }
+  let onConnChange = null;
+
+  /* ============================================================
+     REMOTE CONTROL PAGE  (phone)
+  ============================================================ */
+  if (REMOTE) {
+    $("editor").style.display = "none";
+    $("remoteUI").classList.add("active");
+    const rStatus = $("rStatus");
+    onConnChange = (on) => {
+      rStatus.textContent = on ? "Connected ✓ — controlling the prompter"
+        : (SERVED ? "Waiting for the prompter to be open on the computer…" : "Same-browser mode only");
+      rStatus.style.color = on ? "var(--ok)" : "var(--muted)";
+    };
+    onCmd(() => {}); // establishes connection / polling
+    $("rToggle").onclick = () => sendCmd({ type: "toggle" });
+    $("rStart").onclick = () => sendCmd({ type: "start" });
+    $("rRestart").onclick = () => sendCmd({ type: "restart" });
+    $("rExit").onclick = () => sendCmd({ type: "exit" });
+    const rSpeed = $("rSpeed"), rSize = $("rSize");
+    rSpeed.oninput = () => { $("rSpeedVal").textContent = rSpeed.value; sendCmd({ type: "speed", value: +rSpeed.value }); };
+    rSize.oninput = () => { $("rSizeVal").textContent = rSize.value; sendCmd({ type: "size", value: +rSize.value }); };
+    document.querySelectorAll("#remoteUI .step button").forEach(b => {
+      b.onclick = () => {
+        const [k, v] = b.dataset.d.split(":");
+        if (k === "speed") { rSpeed.value = Math.min(20, Math.max(1, +rSpeed.value + (+v))); rSpeed.oninput(); }
+        else { rSize.value = Math.min(140, Math.max(20, +rSize.value + (+v))); rSize.oninput(); }
+      };
+    });
+    if (!SERVED) rStatus.textContent = "Open the app from the companion server to control from a phone.";
+    return; // don't run the editor/prompter code on the remote page
+  }
+
+  /* ============================================================
+     MAIN APP (editor + prompter)
+  ============================================================ */
+  const LS_KEY = "teleprompter.scripts.v1";
+  const LS_DEFAULTS = "teleprompter.defaults.v1";
+
+  const DEFAULTS = Object.assign(
+    { speed: 5, size: 48, countdown: 3, lineHeight: 1.5, mirror: false, guide: true },
+    loadJSON(LS_DEFAULTS, {})
+  );
+
+  let scripts = [];
+  let currentId = null;
+  let dirHandle = null;
+  let settings = Object.assign({}, DEFAULTS); // active settings (mirror the current script)
+
+  const listEl = $("scriptList"), titleInput = $("titleInput"),
+        scriptText = $("scriptText"), savedFlash = $("savedFlash"), statsEl = $("stats");
+  const speed = $("speed"), size = $("size"), countdownSec = $("countdownSec"),
+        lineHeight = $("lineHeight"), mirror = $("mirror"), guideToggle = $("guideToggle");
+  const speedVal = $("speedVal"), sizeVal = $("sizeVal"), cdVal = $("cdVal"), lhVal = $("lhVal");
+
+  function loadJSON(k, fb) { try { return JSON.parse(localStorage.getItem(k)) || fb; } catch { return fb; } }
+  function loadScripts() { scripts = loadJSON(LS_KEY, []); scripts.forEach(s => { if (!s.settings) s.settings = Object.assign({}, DEFAULTS); }); }
+  function persist() { localStorage.setItem(LS_KEY, JSON.stringify(scripts)); }
+  function persistDefaults() { localStorage.setItem(LS_DEFAULTS, JSON.stringify(settings)); }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function current() { return scripts.find(x => x.id === currentId); }
+
+  function countWords(t) { return (t.trim().match(/\S+/g) || []).length; }
+  function fmtTime(s) { s = Math.max(0, Math.round(s)); const m = Math.floor(s / 60); return m + ":" + String(s % 60).padStart(2, "0"); }
+
+  function renderList() {
+    listEl.innerHTML = "";
+    if (!scripts.length) {
+      const e = document.createElement("div");
+      e.style.cssText = "padding:14px;color:var(--muted);font-size:13px;";
+      e.textContent = "No scripts yet. Click “+ New script”.";
+      listEl.appendChild(e); return;
+    }
+    scripts.slice().sort((a, b) => b.updated - a.updated).forEach(s => {
+      const item = document.createElement("div");
+      item.className = "script-item" + (s.id === currentId ? " active" : "");
+      const left = document.createElement("div");
+      left.style.cssText = "min-width:0;display:flex;flex-direction:column;gap:2px;";
+      const name = document.createElement("span");
+      name.className = "name"; name.textContent = s.name || "Untitled script";
+      const meta = document.createElement("span");
+      meta.className = "meta"; meta.textContent = countWords(s.text) + " words";
+      left.appendChild(name); left.appendChild(meta);
+      const del = document.createElement("button");
+      del.className = "del"; del.textContent = "✕"; del.title = "Delete";
+      del.onclick = (ev) => { ev.stopPropagation(); deleteScript(s.id); };
+      item.appendChild(left); item.appendChild(del);
+      item.onclick = () => selectScript(s.id);
+      listEl.appendChild(item);
+    });
+  }
+
+  function updateStats() {
+    const w = countWords(scriptText.value);
+    const pxPerSec = settings.speed * 30;
+    // rough text height estimate for the editor readout
+    const estLines = scriptText.value.split("\n").reduce((n, ln) => n + Math.max(1, Math.ceil(ln.length / 42)), 0);
+    const estHeight = estLines * settings.size * settings.lineHeight;
+    const secs = estHeight / pxPerSec;
+    statsEl.innerHTML = `<b>${w}</b> words · ${scriptText.value.length} characters · ≈ <b>${fmtTime(secs)}</b> at current speed`;
+  }
+
+  function applySettingsToInputs() {
+    speed.value = settings.speed; speedVal.textContent = settings.speed;
+    size.value = settings.size; sizeVal.textContent = settings.size;
+    countdownSec.value = settings.countdown; cdVal.textContent = settings.countdown;
+    lineHeight.value = settings.lineHeight; lhVal.textContent = settings.lineHeight;
+    mirror.checked = settings.mirror; guideToggle.checked = settings.guide;
+  }
+
+  function selectScript(id) {
+    const s = scripts.find(x => x.id === id); if (!s) return;
+    currentId = id;
+    titleInput.value = s.name;
+    scriptText.value = s.text;
+    settings = Object.assign({}, DEFAULTS, s.settings || {});
+    applySettingsToInputs(); updateStats(); renderList();
+  }
+
+  function newScript() {
+    const s = { id: uid(), name: "Untitled script", text: "", updated: Date.now(), settings: Object.assign({}, DEFAULTS) };
+    scripts.push(s); persist(); selectScript(s.id);
+    titleInput.focus(); titleInput.select();
+  }
+
+  function deleteScript(id) {
+    const s = scripts.find(x => x.id === id);
+    if (!confirm(`Delete “${s ? s.name : "this script"}”?`)) return;
+    scripts = scripts.filter(x => x.id !== id);
+    if (currentId === id) { currentId = null; titleInput.value = ""; scriptText.value = ""; }
+    persist(); renderList(); updateStats();
+  }
+
+  async function saveCurrent(silent) {
+    if (!currentId) newScript();
+    const s = current();
+    s.name = titleInput.value.trim() || "Untitled script";
+    s.text = scriptText.value;
+    s.settings = Object.assign({}, settings);
+    s.updated = Date.now();
+    persist(); renderList();
+    if (dirHandle) { try { await writeToFolder(s); } catch (e) { console.warn(e); } }
+    if (!silent) flashSaved();
+  }
+  function flashSaved() { savedFlash.classList.add("show"); setTimeout(() => savedFlash.classList.remove("show"), 1200); }
+
+  /* ---- local folder (File System Access) ---- */
+  function sanitize(n) { return (n || "script").replace(/[\/\\:*?"<>|]/g, "_").slice(0, 80); }
+  async function pickFolder() {
+    if (!window.showDirectoryPicker) { alert("This browser can't pick a folder. Use Download / Import .txt (works everywhere)."); return; }
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      for (const s of scripts) await writeToFolder(s);
+      alert(`Folder linked. Scripts are now saved as .txt into “${dirHandle.name}”.`);
+    } catch (e) {}
+  }
+  async function writeToFolder(s) {
+    if (!dirHandle) return;
+    const fh = await dirHandle.getFileHandle(sanitize(s.name) + ".txt", { create: true });
+    const w = await fh.createWritable(); await w.write(s.text); await w.close();
+  }
+  function downloadTxt() {
+    const blob = new Blob([scriptText.value], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = (sanitize(titleInput.value) || "script") + ".txt";
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  function importFiles(fileList) {
+    const files = Array.from(fileList); let lastNewId = null, pending = files.length;
+    if (!pending) return;
+    files.forEach(file => {
+      const r = new FileReader();
+      r.onload = () => {
+        const s = { id: uid(), name: file.name.replace(/\.txt$/i, ""), text: String(r.result || ""), updated: Date.now(), settings: Object.assign({}, DEFAULTS) };
+        scripts.push(s); lastNewId = s.id;
+        if (--pending === 0) { persist(); selectScript(lastNewId); }
+      };
+      r.readAsText(file);
+    });
+  }
+
+  /* ---- control bindings (also update per-script settings) ---- */
+  function changed() { persistDefaults(); if (currentId) { current().settings = Object.assign({}, settings); persist(); } updateStats(); }
+  speed.oninput = () => { settings.speed = +speed.value; speedVal.textContent = speed.value; changed(); };
+  size.oninput = () => { settings.size = +size.value; sizeVal.textContent = size.value; changed(); };
+  countdownSec.oninput = () => { settings.countdown = +countdownSec.value; cdVal.textContent = countdownSec.value; changed(); };
+  lineHeight.oninput = () => { settings.lineHeight = +lineHeight.value; lhVal.textContent = lineHeight.value; changed(); };
+  mirror.onchange = () => { settings.mirror = mirror.checked; changed(); };
+  guideToggle.onchange = () => { settings.guide = guideToggle.checked; changed(); };
+
+  $("newBtn").onclick = newScript;
+  $("saveBtn").onclick = () => saveCurrent(false);
+  $("downloadBtn").onclick = downloadTxt;
+  $("folderBtn").onclick = pickFolder;
+  $("importBtn").onclick = () => $("fileInput").click();
+  $("fileInput").onchange = (e) => { importFiles(e.target.files); e.target.value = ""; };
+  titleInput.oninput = () => { const s = current(); if (s) { s.name = titleInput.value; renderList(); } };
+  let autoTimer = null;
+  scriptText.oninput = () => { updateStats(); clearTimeout(autoTimer); autoTimer = setTimeout(() => saveCurrent(true), 800); };
+  titleInput.onblur = () => { clearTimeout(autoTimer); saveCurrent(true); };
+
+  /* ============================================================
+     PROMPTER engine
+  ============================================================ */
+  const prompter = $("prompter"), stage = $("stage"), scrollArea = $("scrollArea"),
+        content = $("prompterContent"), guide = $("guide"), countdownEl = $("countdown");
+  const playPause = $("playPause"), pStats = $("pStats");
+  const pSpeed = $("pSpeed"), pSize = $("pSize"), pSpeedVal = $("pSpeedVal"), pSizeVal = $("pSizeVal");
+
+  let pos = 0, playing = false, rafId = null, lastTs = 0, maxScroll = 0;
+  let curSpeed = settings.speed, curSize = settings.size, words = 0;
+
+  function startOffset() { return stage.clientHeight * 0.40; }
+  function positionGuide() { guide.style.top = (stage.clientHeight * 0.40) + "px"; }
+  function applyTextStyle() {
+    content.style.fontSize = curSize + "px";
+    content.style.lineHeight = settings.lineHeight;
+    scrollArea.style.transform = settings.mirror ? "scaleX(-1) translateY(" + (-pos) + "px)" : "translateY(" + (-pos) + "px)";
+  }
+  function applyTransform() { scrollArea.style.transform = (settings.mirror ? "scaleX(-1) " : "") + "translateY(" + (-pos) + "px)"; }
+  function recomputeBounds() { maxScroll = scrollArea.scrollHeight + startOffset(); updatePStats(); }
+
+  function updatePStats() {
+    const pxPerSec = curSpeed * 30;
+    const secs = scrollArea.scrollHeight / pxPerSec;
+    const wpm = secs > 0 ? Math.round(words / (secs / 60)) : 0;
+    pStats.innerHTML = `<b>${words}</b> words · ≈ <b>${fmtTime(secs)}</b> · <b>${wpm}</b> wpm`;
+  }
+
+  function startPrompter() {
+    if (!scriptText.value.trim()) { alert("Nothing to read — type a script first."); return; }
+    saveCurrent(true);
+    curSpeed = settings.speed; curSize = settings.size; words = countWords(scriptText.value);
+    pSpeed.value = curSpeed; pSpeedVal.textContent = curSpeed;
+    pSize.value = curSize; pSizeVal.textContent = curSize;
+    content.textContent = scriptText.value;
+    applyTextStyle();
+    prompter.classList.add("active");
+    guide.classList.toggle("show", settings.guide);
+    positionGuide();
+    requestAnimationFrame(() => {
+      recomputeBounds(); pos = -startOffset(); applyTransform();
+      runCountdown(settings.countdown, () => setPlaying(true));
+    });
+  }
+
+  function runCountdown(secs, done) {
+    if (!secs || secs <= 0) { countdownEl.classList.remove("show"); done(); return; }
+    let n = secs; countdownEl.textContent = n; countdownEl.classList.add("show");
+    const tick = () => { n--; if (n <= 0) { countdownEl.classList.remove("show"); done(); } else { countdownEl.textContent = n; setTimeout(tick, 1000); } };
+    setTimeout(tick, 1000);
+  }
+
+  function setPlaying(p) {
+    playing = p;
+    playPause.textContent = p ? "❚❚ Pause" : "▶ Play";
+    playPause.classList.toggle("primary", !p);
+    if (p) { lastTs = 0; rafId = requestAnimationFrame(loop); }
+    else if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  }
+  function loop(ts) {
+    if (!playing) return;
+    if (!lastTs) lastTs = ts;
+    const dt = (ts - lastTs) / 1000; lastTs = ts;
+    pos += curSpeed * 30 * dt;
+    if (pos >= maxScroll) { pos = maxScroll; applyTransform(); setPlaying(false); return; }
+    applyTransform(); rafId = requestAnimationFrame(loop);
+  }
+  function restart() {
+    recomputeBounds(); pos = -startOffset(); applyTransform(); setPlaying(false);
+    runCountdown(settings.countdown, () => setPlaying(true));
+  }
+  function exitPrompter() {
+    setPlaying(false); prompter.classList.remove("active"); countdownEl.classList.remove("show");
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else prompter.requestFullscreen ? prompter.requestFullscreen().catch(() => {}) : null;
+  }
+  function setSpeed(v) { curSpeed = Math.min(20, Math.max(1, v)); pSpeed.value = curSpeed; pSpeedVal.textContent = curSpeed; settings.speed = curSpeed; speed.value = curSpeed; speedVal.textContent = curSpeed; persistDefaults(); if (currentId) { current().settings.speed = curSpeed; persist(); } updatePStats(); }
+  function setSize(v) { curSize = Math.min(140, Math.max(20, v)); pSize.value = curSize; pSizeVal.textContent = curSize; settings.size = curSize; size.value = curSize; sizeVal.textContent = curSize; applyTextStyle(); recomputeBounds(); persistDefaults(); if (currentId) { current().settings.size = curSize; persist(); } }
+
+  $("startBtn").onclick = startPrompter;
+  playPause.onclick = () => setPlaying(!playing);
+  $("restart").onclick = restart;
+  $("exitBtn").onclick = exitPrompter;
+  $("fsBtn").onclick = toggleFullscreen;
+  pSpeed.oninput = () => setSpeed(+pSpeed.value);
+  pSize.oninput = () => setSize(+pSize.value);
+
+  document.addEventListener("keydown", (e) => {
+    if (!prompter.classList.contains("active")) return;
+    switch (e.key) {
+      case " ": e.preventDefault(); setPlaying(!playing); break;
+      case "ArrowUp": e.preventDefault(); setSpeed(curSpeed + 0.5); break;
+      case "ArrowDown": e.preventDefault(); setSpeed(curSpeed - 0.5); break;
+      case "ArrowRight": e.preventDefault(); setSize(curSize + 2); break;
+      case "ArrowLeft": e.preventDefault(); setSize(curSize - 2); break;
+      case "f": case "F": toggleFullscreen(); break;
+      case "r": case "R": restart(); break;
+      case "PageDown": e.preventDefault(); setPlaying(!playing); break; // Bluetooth clicker: next
+      case "PageUp": e.preventDefault(); restart(); break;             // Bluetooth clicker: prev
+      case "Escape": if (!document.fullscreenElement) exitPrompter(); break;
+    }
+  });
+  // Esc closes the Connect-remote modal
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modalBack.classList.contains("show")) closeModal();
+  });
+  window.addEventListener("resize", () => { if (prompter.classList.contains("active")) { positionGuide(); recomputeBounds(); } });
+
+  /* ============================================================
+     Receive remote commands (from phone / another window)
+  ============================================================ */
+  function handleRemote(cmd) {
+    const active = prompter.classList.contains("active");
+    switch (cmd.type) {
+      case "toggle": if (!active) startPrompter(); else setPlaying(!playing); break;
+      case "play": if (active) setPlaying(true); break;
+      case "pause": if (active) setPlaying(false); break;
+      case "start": if (!active) startPrompter(); else restart(); break;
+      case "restart": if (active) restart(); break;
+      case "exit": if (active) exitPrompter(); break;
+      case "speed": setSpeed(cmd.value); break;
+      case "size": setSize(cmd.value); break;
+    }
+  }
+  onCmd(handleRemote);
+
+  /* ---- Connect remote modal ---- */
+  const modalBack = $("modalBack"), modalBody = $("modalBody"), remoteDot = $("remoteDot");
+  const bluetoothHelp =
+    `<section><h3>Bluetooth clicker</h3>` +
+    `<p>Pair a <b>Bluetooth presenter clicker</b> or page-turner pedal with this computer (they connect as a keyboard). ` +
+    `In the prompter, its buttons control scrolling:</p>` +
+    `<p><b>Next / Page Down</b> → play&nbsp;/&nbsp;pause &nbsp;·&nbsp; <b>Prev / Page Up</b> → restart</p>` +
+    `<p style="font-size:12px;">Note: a phone can't connect over Bluetooth — that's only for hardware clickers. Use the Wi-Fi option above to use a phone.</p></section>`;
+
+  function buildModal() {
+    if (SERVED) {
+      const url = location.origin + location.pathname + "?remote";
+      modalBody.innerHTML =
+        `<section><h3>Phone (Wi-Fi)</h3>` +
+        `<p>On your phone, on the <b>same Wi-Fi</b>, open:</p>` +
+        `<p><code>${url}</code></p>` +
+        `<p class="status"><span class="dot" id="mDot"></span><span id="mState">Waiting for phone…</span></p></section>` +
+        bluetoothHelp;
+    } else {
+      modalBody.innerHTML =
+        `<section><h3>Phone (Wi-Fi)</h3>` +
+        `<p>To control from a phone, start the companion server, then open the address it prints. ` +
+        `Run in Terminal:</p>` +
+        `<p><code>python3 teleprompter-server.py</code></p>` +
+        (bc ? `<p style="font-size:12px;">Or open <b>this same file</b> with <b>?remote</b> in another window on this computer (second-screen remote).</p>` : ``) +
+        `</section>` + bluetoothHelp;
+    }
+  }
+  function openModal() { buildModal(); modalBack.classList.add("show"); onConnChange(connected); }
+  function closeModal() { modalBack.classList.remove("show"); }
+  // keep the button dot (and modal status, if open) in sync with the live connection
+  onConnChange = (on) => {
+    remoteDot.classList.toggle("on", on);
+    const d = $("mDot"), s = $("mState");
+    if (d) d.classList.toggle("on", on);
+    if (s) { s.textContent = on ? "Phone connected ✓" : "Waiting for phone…"; s.style.color = on ? "var(--ok)" : "var(--muted)"; }
+  };
+  $("connectBtn").onclick = openModal;
+  $("modalClose").onclick = closeModal;
+  modalBack.onclick = (e) => { if (e.target === modalBack) closeModal(); };
+
+  /* ---- boot ---- */
+  loadScripts(); renderList();
+  if (scripts.length) selectScript(scripts.slice().sort((a, b) => b.updated - a.updated)[0].id);
+  else newScript();
+  updateStats();
+})();
+</script>
+</body>
+</html>
